@@ -32,7 +32,7 @@ type VaultMeta = { username: string; salt: string };
 function bytesToBase64(bytes: Uint8Array) {
   let binary = '';
   for (let start = 0; start < bytes.length; start += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(start, Math.min(start + 0x8000, bytes.length)));
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(start, Math.min(start + 0x8000, bytes.length))));
   }
   return btoa(binary);
 }

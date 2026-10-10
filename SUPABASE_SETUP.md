@@ -18,7 +18,7 @@ In Supabase, open **Authentication → URL Configuration**.
 
 Set the Site URL to:
 
-\`https://shalem046-cyber.github.io/daily-activity-tracker/\`
+\`https://shalem046-cyber.github.io/writeyourdiary/\`
 
 Add that same address to the allowed redirect URLs. Keep email confirmation enabled for accounts.
 

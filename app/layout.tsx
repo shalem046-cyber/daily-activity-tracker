@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "VitalFlow | Daily Life Tracker",
-  description: "Professional daily life tracker and wellness dashboard",
+  title: "Daily Diary | VitalFlow",
+  description: "A calm personal diary to record daily activities and reflect on your routines.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

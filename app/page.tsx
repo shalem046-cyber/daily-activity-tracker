@@ -2,506 +2,420 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-type ActivityType = 'Gym' | 'Meal' | 'Sleep' | 'Hydration' | 'Walk' | 'Work' | 'Study' | 'Mindfulness';
-
-type Activity = {
+type DiaryEntry = {
   id: string;
-  type: ActivityType;
-  title: string;
-  duration: number;
-  intensity: number;
-  note: string;
   date: string;
-  time: string;
-};
-
-type FormState = {
-  type: ActivityType;
   title: string;
-  duration: number;
-  intensity: number;
-  note: string;
-  time: string;
+  body: string;
+  createdAt: string;
 };
 
-const activityOptions: { value: ActivityType; label: string }[] = [
-  { value: 'Gym', label: 'Gym' },
-  { value: 'Meal', label: 'Meal' },
-  { value: 'Sleep', label: 'Sleep' },
-  { value: 'Hydration', label: 'Hydration' },
-  { value: 'Walk', label: 'Walk' },
-  { value: 'Work', label: 'Work' },
-  { value: 'Study', label: 'Study' },
-  { value: 'Mindfulness', label: 'Mindfulness' },
-];
-
-const formatDay = (date: Date) => date.toLocaleDateString('en-US', { weekday: 'short' });
-
-const getDateKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+type InsightSet = {
+  headline: string;
+  summary: string;
+  observations: string[];
 };
 
-const getRecentDayKey = (daysAgo: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return getDateKey(date);
-};
+const STORAGE_KEY = 'vitalflow-diary-entries';
 
-const createSampleActivities = (): Activity[] => {
-  const today = getDateKey(new Date());
-  const yesterday = getRecentDayKey(1);
-  const past3 = getRecentDayKey(3);
+function getDateKey(date: Date) {
+  return date.getFullYear() + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+    String(date.getDate()).padStart(2, '0');
+}
 
-  return [
-    {
-      id: 'demo-1',
-      type: 'Gym',
-      title: 'Strength training',
-      duration: 50,
-      intensity: 4,
-      note: 'Upper body and core work',
-      date: today,
-      time: '07:15',
-    },
-    {
-      id: 'demo-2',
-      type: 'Meal',
-      title: 'Healthy lunch',
-      duration: 1,
-      intensity: 3,
-      note: 'Chicken, rice and vegetables',
-      date: today,
-      time: '13:00',
-    },
-    {
-      id: 'demo-3',
-      type: 'Hydration',
-      title: 'Water intake',
-      duration: 2,
-      intensity: 3,
-      note: '2 litres consumed',
-      date: today,
-      time: '18:30',
-    },
-    {
-      id: 'demo-4',
-      type: 'Sleep',
-      title: 'Night rest',
-      duration: 8,
-      intensity: 5,
-      note: 'Good sleep routine',
-      date: yesterday,
-      time: '22:30',
-    },
-    {
-      id: 'demo-5',
-      type: 'Walk',
-      title: 'Evening walk',
-      duration: 30,
-      intensity: 3,
-      note: 'Fresh air and movement',
-      date: past3,
-      time: '19:10',
-    },
-  ];
-};
+function dateFromKey(key: string) {
+  return new Date(key + 'T12:00:00');
+}
 
-const defaultForm: FormState = {
-  type: 'Gym',
-  title: '',
-  duration: 30,
-  intensity: 3,
-  note: '',
-  time: '08:00',
-};
+function formatLongDate(key: string) {
+  if (!key) return 'Preparing today’s page…';
+  return dateFromKey(key).toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
 
-const unitFor = (type: ActivityType) => {
-  switch (type) {
-    case 'Sleep':
-      return 'hrs';
-    case 'Hydration':
-      return 'L';
-    case 'Meal':
-      return 'meals';
-    default:
-      return 'min';
+function formatEntryDate(key: string) {
+  return dateFromKey(key).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function countWords(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
+function makeTitle(body: string) {
+  const firstLine = body.trim().split('\n')[0].replace(/\s+/g, ' ').trim();
+  if (!firstLine) return 'Daily reflection';
+  return firstLine.length > 58 ? firstLine.slice(0, 55) + '…' : firstLine;
+}
+
+function analyzeDiary(text: string): InsightSet {
+  const value = text.trim();
+  if (!value) {
+    return {
+      headline: 'Your page is ready',
+      summary: 'Write naturally about how your day went. As you add details, this space will highlight patterns and practical next steps.',
+      observations: [
+        'Mention what you did, learned, enjoyed, or found difficult.',
+        'You can include sleep, meals, water, exercise, study, hobbies, or mood in your own words.',
+        'There is no perfect format. A few honest sentences are enough.',
+      ],
+    };
   }
-};
+
+  const observations: string[] = [];
+  const sleepMatch = value.match(/\b(?:slept|sleep(?:ing)?)\s+(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i)
+    || value.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s*(?:of\s+)?sleep\b/i);
+
+  const waterMatch = value.match(/\b(\d+(?:\.\d+)?)\s*(?:litres?|liters?|l)\s*(?:of\s+)?water\b/i)
+    || value.match(/\bdrank\s+(\d+(?:\.\d+)?)\s*(?:litres?|liters?|l)\b/i);
+
+  const movementMatch = value.match(/\b(\d+)\s*(?:minutes?|mins?)\s*(?:of\s+)?(?:walking|walk|exercise|workout|gym|running|run|cycling|training|movement)\b/i)
+    || value.match(/\b(?:walked|ran|cycled|exercised|trained|worked out)\s+(?:for\s+)?(\d+)\s*(?:minutes?|mins?)\b/i)
+    || value.match(/\b(?:gym|workout|exercise|walk|walking|run|running|cycle|cycling|training)\D{0,15}(\d+)\s*(?:minutes?|mins?)\b/i);
+
+  if (sleepMatch) {
+    const hours = Number(sleepMatch[1]);
+    if (hours < 7) {
+      observations.push('You recorded about ' + hours + ' hours of sleep. Consider making room for a calm wind-down and a consistent bedtime tonight.');
+    } else {
+      observations.push('You recorded about ' + hours + ' hours of sleep. Keep noticing how your rest affects your focus and energy the next day.');
+    }
+  } else if (/\b(sleep|slept|tired|rest|bedtime)\b/i.test(value)) {
+    observations.push('You mentioned rest or sleep, but not a duration. Adding the approximate hours can help you notice your own patterns over time.');
+  }
+
+  if (waterMatch) {
+    observations.push('Your entry mentions about ' + waterMatch[1] + ' litres of water. Keep recording it in the same way if you want to compare your routine across days.');
+  } else if (/\b(water|hydration|drink|drank)\b/i.test(value)) {
+    observations.push('You mentioned drinking water. A rough amount can make the diary more useful when you review your week.');
+  }
+
+  if (movementMatch) {
+    observations.push('You recorded around ' + movementMatch[1] + ' minutes of movement. Note how it felt, not just how long it lasted.');
+  } else if (/\b(gym|workout|exercise|walk|walking|ran|running|cycling|sport|badminton|volleyball|training)\b/i.test(value)) {
+    observations.push('Movement or sport showed up in your entry. You could note the activity and approximate duration to make future comparisons clearer.');
+  }
+
+  if (/\b(studied|study|studying|homework|assignment|exam|learned|learning|practised|practiced|practice|coding|piano|music|reading)\b/i.test(value)) {
+    observations.push('You made space for learning or a skill. Write down one thing you understood or improved, so the entry captures progress as well as time spent.');
+  }
+
+  if (/\b(stressed|stressful|overwhelmed|tired|anxious|worried|upset|low|difficult|hard day)\b/i.test(value)) {
+    observations.push('Your entry describes a difficult or tiring moment. Keep tomorrow’s plan realistic, take a pause when you can, and speak with someone you trust if you need support.');
+  } else if (/\b(happy|proud|grateful|enjoyed|fun|confident|good day|progress|success)\b/i.test(value)) {
+    observations.push('You recorded a positive moment. Notice what helped make it happen; that may be worth repeating.');
+  }
+
+  if (observations.length === 0) {
+    observations.push('Your entry is saved as a record of the day. Add a little detail about what went well or what felt difficult to get more useful reflections.');
+  }
+
+  if (countWords(value) >= 45) {
+    observations.push('You captured a detailed entry. When you review it later, look for patterns rather than judging one day in isolation.');
+  }
+
+  return {
+    headline: 'A reflection on your day',
+    summary: 'These notes are based on the words and quantities in your diary entry. They are practical prompts, not a medical assessment.',
+    observations: observations.slice(0, 4),
+  };
+}
 
 export default function Home() {
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [form, setForm] = useState<FormState>(defaultForm);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [reminderTime, setReminderTime] = useState('08:30');
+  const [entries, setEntries] = useState<DiaryEntry[]>([]);
+  const [draft, setDraft] = useState('');
+  const [todayKey, setTodayKey] = useState('');
+  const [isReady, setIsReady] = useState(false);
+  const [saveMessage, setSaveMessage] = useState('');
 
   useEffect(() => {
-    const savedActivities = localStorage.getItem('vitalflow-activities');
-    if (savedActivities) {
-      try {
-        setActivities(JSON.parse(savedActivities));
-      } catch {
-        setActivities(createSampleActivities());
+    setTodayKey(getDateKey(new Date()));
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setEntries(parsed);
       }
-    } else {
-      setActivities(createSampleActivities());
+    } catch {
+      setEntries([]);
     }
+    setIsReady(true);
   }, []);
 
   useEffect(() => {
-    if (activities.length > 0) {
-      localStorage.setItem('vitalflow-activities', JSON.stringify(activities));
+    if (!isReady) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    } catch {
+      setSaveMessage('Your browser could not save the diary. Check its storage settings.');
     }
-  }, [activities]);
+  }, [entries, isReady]);
 
-  useEffect(() => {
-    if (!(typeof window !== 'undefined' && 'Notification' in window)) {
-      return;
-    }
-
-    setNotificationsEnabled(Notification.permission === 'granted');
-  }, []);
-
-  useEffect(() => {
-    if (!notificationsEnabled || !(typeof window !== 'undefined' && 'Notification' in window)) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-      if (currentTime === reminderTime && Notification.permission === 'granted') {
-        new Notification('VitalFlow reminder', {
-          body: 'Take a quick moment to log your progress and keep your routine on track.',
-        });
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [notificationsEnabled, reminderTime]);
-
-  const todayKey = getDateKey(new Date());
-  const todayActivities = useMemo(
-    () => activities.filter((item) => item.date === todayKey),
-    [activities, todayKey],
+  const sortedEntries = useMemo(
+    () => [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
+    [entries],
   );
 
-  const totalMinutes = todayActivities.reduce((sum, item) => sum + item.duration, 0);
-  const workoutMinutes = todayActivities
-    .filter((item) => item.type === 'Gym' || item.type === 'Walk')
-    .reduce((sum, item) => sum + item.duration, 0);
-  const sleepHours = todayActivities
-    .filter((item) => item.type === 'Sleep')
-    .reduce((sum, item) => sum + item.duration, 0);
-  const hydrationLiters = todayActivities
-    .filter((item) => item.type === 'Hydration')
-    .reduce((sum, item) => sum + item.duration, 0);
+  const todayEntries = useMemo(
+    () => entries.filter((entry) => entry.date === todayKey),
+    [entries, todayKey],
+  );
 
-  const consistencyScore = Math.min(100, Math.round((workoutMinutes / 90) * 45 + (sleepHours / 8) * 35 + (hydrationLiters / 2) * 20));
+  const todayText = todayEntries.map((entry) => entry.title + '\n' + entry.body).join('\n\n');
+  const liveText = [todayText, draft].filter(Boolean).join('\n\n');
+  const todayWordCount = countWords(liveText);
+  const reflection = useMemo(() => analyzeDiary(liveText), [liveText]);
 
-  const weeklyTrend = useMemo(() => {
-    const labels: string[] = [];
-    const values: number[] = [];
-
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const label = formatDay(date);
-      const key = getDateKey(date);
-      const value = activities
-        .filter((item) => item.date === key)
-        .reduce((sum, item) => sum + item.duration, 0);
-
-      labels.push(label);
-      values.push(value);
+  const weekDays = useMemo(() => {
+    if (!todayKey) return [];
+    const today = dateFromKey(todayKey);
+    const days: { key: string; label: string; dateLabel: string; count: number }[] = [];
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const day = new Date(today);
+      day.setDate(day.getDate() - offset);
+      const key = getDateKey(day);
+      days.push({
+        key,
+        label: day.toLocaleDateString('en-IN', { weekday: 'short' }),
+        dateLabel: day.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        count: entries.filter((entry) => entry.date === key).length,
+      });
     }
+    return days;
+  }, [entries, todayKey]);
 
-    return { labels, values };
-  }, [activities]);
+  const recordedDays = weekDays.filter((day) => day.count > 0).length;
+  const maxDayCount = Math.max(1, ...weekDays.map((day) => day.count));
 
-  const suggestions = useMemo(() => {
-    const items: string[] = [];
-
-    if (sleepHours < 8) {
-      items.push('You are slightly below a healthy sleep target. Aim for 8 hours tonight to recover and stay focused.');
-    } else {
-      items.push('Excellent sleep routine. Your recovery quality is strong and your energy should stay balanced.');
+  const writingStreak = useMemo(() => {
+    if (!todayKey) return 0;
+    const recorded = new Set(entries.map((entry) => entry.date));
+    const cursor = dateFromKey(todayKey);
+    if (!recorded.has(todayKey)) cursor.setDate(cursor.getDate() - 1);
+    let streak = 0;
+    while (recorded.has(getDateKey(cursor))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
     }
+    return streak;
+  }, [entries, todayKey]);
 
-    if (workoutMinutes < 60) {
-      items.push('Your activity level is a bit low. Adding a 20–30 minute movement session would help a lot.');
-    } else {
-      items.push('You are doing great with movement. Keep that momentum going to support your health and performance.');
-    }
-
-    if (hydrationLiters < 2) {
-      items.push('Hydration is below target. Try to drink water regularly throughout the day for better focus and recovery.');
-    } else {
-      items.push('Hydration is on track. This supports your energy, focus, and daily performance.');
-    }
-
-    if (todayActivities.length < 3) {
-      items.push('You have a lighter routine today. Logging at least 3 healthy habits can help you build a stronger pattern.');
-    } else {
-      items.push('Your daily rhythm is balanced. Staying consistent with your log will make it easier to spot long-term improvement.');
-    }
-
-    return items.slice(0, 4);
-  }, [sleepHours, workoutMinutes, hydrationLiters, todayActivities.length]);
-
-  const handleAddActivity = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const body = draft.trim();
+    if (!body || !todayKey) return;
 
-    const title = form.title.trim() || `${form.type} check-in`;
-
-    const nextItem: Activity = {
-      id: `${Date.now()}`,
-      type: form.type,
-      title,
-      duration: Number(form.duration),
-      intensity: Number(form.intensity),
-      note: form.note.trim() || 'Logged from daily planner',
+    const entry: DiaryEntry = {
+      id: String(Date.now()) + '-' + String(Math.floor(Math.random() * 1000000)),
       date: todayKey,
-      time: form.time,
+      title: makeTitle(body),
+      body,
+      createdAt: new Date().toISOString(),
     };
 
-    setActivities((current) => [nextItem, ...current]);
-    setForm({ ...defaultForm, type: form.type });
+    setEntries((current) => [entry, ...current]);
+    setDraft('');
+    setSaveMessage('Saved to your diary on this device.');
   };
 
-  const handleEnableNotifications = async () => {
-    if (!(typeof window !== 'undefined' && 'Notification' in window)) {
-      return;
-    }
+  const handleDelete = (id: string) => {
+    setEntries((current) => current.filter((entry) => entry.id !== id));
+    setSaveMessage('Diary entry deleted.');
+  };
 
-    const permission = await Notification.requestPermission();
-    setNotificationsEnabled(permission === 'granted');
+  const addPrompt = (prompt: string) => {
+    setDraft((current) => current.trim() ? current.trimEnd() + '\n\n' + prompt : prompt);
+    setSaveMessage('');
   };
 
   return (
     <main className="page-shell">
       <div className="container">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">Daily wellness dashboard</p>
-            <h1>VitalFlow</h1>
+          <div className="brand-lockup">
+            <div className="brand-mark" aria-hidden="true">V</div>
+            <div>
+              <p className="eyebrow">VITALFLOW · PERSONAL JOURNAL</p>
+              <p className="brand-name">Daily Diary</p>
+            </div>
           </div>
-          <button className="ghost-button" onClick={handleEnableNotifications}>
-            {notificationsEnabled ? 'Notifications on' : 'Enable reminders'}
-          </button>
+          <div className="header-date">
+            <span className="date-dot" aria-hidden="true" />
+            <span>{formatLongDate(todayKey)}</span>
+          </div>
         </header>
 
-        <section className="hero-panel">
-          <div className="hero-copy">
-            <p className="subtitle">Track habits, improve consistency, and stay motivated every day.</p>
-            <h2>Build a healthy routine you can actually stick to.</h2>
-            <p>
-              Log your gym sessions, meals, sleep, hydration, walks, and daily focus in one place — then let the app
-aalyse your activity and suggest better patterns.
-            </p>
+        <section className="welcome-row">
+          <div>
+            <p className="section-kicker">YOUR SPACE, YOUR PACE</p>
+            <h1>Make sense of your day.</h1>
+            <p className="welcome-copy">Write what happened in your own words. Your diary will help you notice routines, small wins, and things to improve.</p>
           </div>
-
-          <div className="score-box">
-            <span>Consistency score</span>
-            <strong>{consistencyScore}%</strong>
-            <small>{todayActivities.length} activities logged today</small>
+          <div className="privacy-note">
+            <span className="privacy-icon" aria-hidden="true">✦</span>
+            <span><strong>Your pages stay on this device</strong><small>No account required</small></span>
           </div>
         </section>
 
-        <section className="metrics-grid">
-          <article className="metric-card accent-blue">
-            <label>Today</label>
-            <strong>{totalMinutes}</strong>
-            <span>minutes logged</span>
+        <section className="stats-grid" aria-label="Diary overview">
+          <article className="stat-card">
+            <span className="stat-label">Writing streak</span>
+            <div className="stat-value">{writingStreak}<span className="stat-unit"> {writingStreak === 1 ? 'day' : 'days'}</span></div>
+            <p>Consecutive days with an entry</p>
           </article>
-          <article className="metric-card accent-green">
-            <label>Sleep</label>
-            <strong>{sleepHours || 0}</strong>
-            <span>hours</span>
+          <article className="stat-card">
+            <span className="stat-label">This week</span>
+            <div className="stat-value">{recordedDays}<span className="stat-unit"> / 7 days</span></div>
+            <p>Days you have written something</p>
           </article>
-          <article className="metric-card accent-purple">
-            <label>Workout</label>
-            <strong>{workoutMinutes}</strong>
-            <span>minutes</span>
-          </article>
-          <article className="metric-card accent-orange">
-            <label>Hydration</label>
-            <strong>{hydrationLiters || 0}</strong>
-            <span>litres</span>
+          <article className="stat-card">
+            <span className="stat-label">Today’s words</span>
+            <div className="stat-value">{todayWordCount}</div>
+            <p>Saved notes plus your current draft</p>
           </article>
         </section>
 
-        <section className="content-grid">
-          <div className="left-column">
-            <article className="card form-card">
-              <div className="section-heading">
-                <h3>Add daily activity</h3>
-                <span>Track your progress</span>
+        <section className="dashboard-grid">
+          <div className="main-column">
+            <article className="panel editor-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">TODAY’S PAGE</p>
+                  <h2>Dear diary,</h2>
+                </div>
+                <span className="date-stamp">{todayKey ? dateFromKey(todayKey).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</span>
               </div>
 
-              <form onSubmit={handleAddActivity} className="activity-form">
-                <div className="form-grid">
-                  <label>
-                    <span>Category</span>
-                    <select
-                      value={form.type}
-                      onChange={(event) => setForm({ ...form, type: event.target.value as ActivityType })}
-                    >
-                      {activityOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+              <p className="editor-guidance">No categories or long forms. Just write naturally about your day — what you did, how you felt, what you learned, or what you want to remember.</p>
 
-                  <label>
-                    <span>Title</span>
-                    <input
-                      type="text"
-                      value={form.title}
-                      onChange={(event) => setForm({ ...form, title: event.target.value })}
-                      placeholder="Morning workout"
-                    />
-                  </label>
+              <form onSubmit={handleSave}>
+                <label className="sr-only" htmlFor="diary-entry">Write your daily diary entry</label>
+                <textarea
+                  id="diary-entry"
+                  className="diary-textarea"
+                  value={draft}
+                  onChange={(event) => { setDraft(event.target.value); setSaveMessage(''); }}
+                  placeholder={'Today I woke up at…\n\nI spent time on…\n\nOne thing I learned or want to improve is…'}
+                  rows={10}
+                  required
+                />
 
-                  <label>
-                    <span>Duration</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.duration}
-                      onChange={(event) => setForm({ ...form, duration: Number(event.target.value) || 0 })}
-                    />
-                  </label>
-
-                  <label>
-                    <span>Intensity</span>
-                    <input
-                      type="range"
-                      min="1"
-                      max="5"
-                      value={form.intensity}
-                      onChange={(event) => setForm({ ...form, intensity: Number(event.target.value) })}
-                    />
-                    <small>{form.intensity}/5</small>
-                  </label>
-
-                  <label>
-                    <span>Time</span>
-                    <input
-                      type="time"
-                      value={form.time}
-                      onChange={(event) => setForm({ ...form, time: event.target.value })}
-                    />
-                  </label>
+                <div className="writing-prompts" aria-label="Writing prompts">
+                  <span>Need a starting point?</span>
+                  <button type="button" className="prompt-chip" onClick={() => addPrompt('A moment worth remembering: ')}>A moment to remember</button>
+                  <button type="button" className="prompt-chip" onClick={() => addPrompt('Something I learned: ')}>Something I learned</button>
+                  <button type="button" className="prompt-chip" onClick={() => addPrompt('Tomorrow, I want to: ')}>Tomorrow’s intention</button>
                 </div>
 
-                <label>
-                  <span>Note</span>
-                  <textarea
-                    value={form.note}
-                    onChange={(event) => setForm({ ...form, note: event.target.value })}
-                    rows={3}
-                    placeholder="What did you do, and how did it feel?"
-                  />
-                </label>
-
-                <button type="submit" className="primary-button">
-                  Save activity
-                </button>
+                <div className="editor-footer">
+                  <span className="word-count">{countWords(draft)} words in this entry</span>
+                  <button className="save-button" type="submit" disabled={!draft.trim() || !todayKey}>
+                    Save diary entry <span aria-hidden="true">↗</span>
+                  </button>
+                </div>
+                {saveMessage ? <p className="save-message" role="status">{saveMessage}</p> : null}
               </form>
             </article>
 
-            <article className="card chart-card">
-              <div className="section-heading">
-                <h3>7-day rhythm</h3>
-                <span>Activity trend</span>
+            <article className="panel history-panel">
+              <div className="panel-heading history-heading">
+                <div>
+                  <p className="section-kicker">YOUR JOURNAL</p>
+                  <h2>Recent pages</h2>
+                </div>
+                <span className="entry-count">{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</span>
               </div>
 
-              <div className="bar-chart" aria-label="Weekly activity trend">
-                {weeklyTrend.labels.map((label, index) => {
-                  const value = weeklyTrend.values[index];
-                  const height = Math.max((value / 8) * 100, value === 0 ? 5 : 15);
-
-                  return (
-                    <div key={label + index} className="bar-column">
-                      <div className="bar-track">
-                        <div className="bar-fill" style={{ height: `${height}%` }} />
+              {sortedEntries.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-mark" aria-hidden="true">✎</div>
+                  <strong>Your story starts here.</strong>
+                  <p>Save your first entry and it will appear here, ready for you to revisit.</p>
+                </div>
+              ) : (
+                <div className="entry-list">
+                  {sortedEntries.map((entry) => (
+                    <article className="entry-item" key={entry.id}>
+                      <div className="entry-date">{formatEntryDate(entry.date)}</div>
+                      <div className="entry-content">
+                        <h3>{entry.title}</h3>
+                        <p>{entry.body}</p>
+                        <span className="entry-meta">{countWords(entry.body)} words · {new Date(entry.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <small>{label}</small>
-                    </div>
-                  );
-                })}
-              </div>
+                      <button className="delete-button" type="button" onClick={() => handleDelete(entry.id)} aria-label={'Delete diary entry: ' + entry.title}>Delete</button>
+                    </article>
+                  ))}
+                </div>
+              )}
             </article>
           </div>
 
-          <div className="right-column">
-            <article className="card suggestion-card">
-              <div className="section-heading">
-                <h3>Smart suggestions</h3>
-                <span>Based on your routine</span>
+          <aside className="side-column">
+            <article className="panel reflection-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">PERSONAL REFLECTION</p>
+                  <h2>{reflection.headline}</h2>
+                </div>
+                <span className="reflection-symbol" aria-hidden="true">✦</span>
               </div>
-
-              <ul className="suggestion-list">
-                {suggestions.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="card reminder-card">
-              <div className="section-heading">
-                <h3>Reminder setup</h3>
-                <span>Stay on track</span>
-              </div>
-
-              <div className="reminder-row">
-                <label>
-                  <span>Daily reminder time</span>
-                  <input
-                    type="time"
-                    value={reminderTime}
-                    onChange={(event) => setReminderTime(event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <p className="reminder-note">
-                {notificationsEnabled
-                  ? `You’ll receive a reminder each day at ${reminderTime}.`
-                  : 'Enable browser notifications to receive activity reminders.'}
-              </p>
-            </article>
-
-            <article className="card recent-card">
-              <div className="section-heading">
-                <h3>Recent entries</h3>
-                <span>{todayActivities.length} today</span>
-              </div>
-
-              <ul className="recent-list">
-                {todayActivities.slice(0, 5).map((item) => (
-                  <li key={item.id}>
-                    <div>
-                      <strong>{item.title}</strong>
-                      <small>
-                        {item.type} · {item.time}
-                      </small>
-                    </div>
-                    <span>
-                      {item.type === 'Hydration' ? `${item.duration}L` : `${item.duration}${unitFor(item.type)}`}
-                    </span>
+              <p className="reflection-summary">{reflection.summary}</p>
+              <ul className="insight-list">
+                {reflection.observations.map((observation, index) => (
+                  <li key={observation}>
+                    <span className="insight-number">0{index + 1}</span>
+                    <p>{observation}</p>
                   </li>
                 ))}
               </ul>
+              <p className="insight-footnote">Insights update as you write. They use simple on-device text patterns, not an AI or medical assessment.</p>
             </article>
-          </div>
+
+            <article className="panel rhythm-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">YOUR CONSISTENCY</p>
+                  <h2>Weekly rhythm</h2>
+                </div>
+                <span className="chart-caption">Entries per day</span>
+              </div>
+              <div className="week-chart" aria-label="Diary entries over the last seven days">
+                {weekDays.map((day) => (
+                  <div className="week-day" key={day.key} title={day.dateLabel + ': ' + day.count + ' entries'}>
+                    <span className="bar-number">{day.count || ''}</span>
+                    <div className="bar-track">
+                      <div className="bar-fill" style={{ height: (day.count === 0 ? 5 : Math.max(18, (day.count / maxDayCount) * 100)) + '%' }} />
+                    </div>
+                    <span className="bar-label">{day.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="chart-legend">
+                <span className="legend-dot" aria-hidden="true" />
+                <span>{recordedDays} of 7 days recorded this week</span>
+              </div>
+            </article>
+
+            <div className="gentle-reminder">
+              <span aria-hidden="true">“</span>
+              <p>You don’t need a perfect day to write a meaningful page.</p>
+            </div>
+          </aside>
         </section>
+
+        <footer className="page-footer">
+          <span>VITALFLOW · DAILY DIARY</span>
+          <span>Your data is stored locally in this browser. It does not sync between devices.</span>
+        </footer>
       </div>
     </main>
   );

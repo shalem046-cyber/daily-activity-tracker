@@ -6,8 +6,8 @@ const nextConfig = {
   output: 'export',
   trailingSlash: true,
   images: { unoptimized: true },
-  // GitHub Pages hosts this project under /daily-activity-tracker, not at the domain root.
-  basePath: isGitHubPages ? '/daily-activity-tracker' : '',
+  // GitHub Pages hosts this project under /writeyourdiary, not at the domain root.
+  basePath: isGitHubPages ? '/writeyourdiary' : '',
 };
 
 export default nextConfig;

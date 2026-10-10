@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   build:
+    # Reads repository-level settings or settings from the github-pages environment.
+    environment:
+      name: github-pages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -26,6 +29,19 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: npm install
+      - name: Verify Supabase build configuration
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ]; then
+            echo "::error::Supabase URL missing. Add NEXT_PUBLIC_SUPABASE_URL as a repository variable/secret or a github-pages environment variable/secret."
+            exit 1
+          fi
+          if [ -z "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::Supabase public key missing. Add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) as a repository or github-pages environment variable/secret."
+            exit 1
+          fi
       - name: Build static site
         run: npm run build
         env:

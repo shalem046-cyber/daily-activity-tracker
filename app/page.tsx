@@ -670,9 +670,9 @@ export default function Home() {
           <div className="setup-steps">
             <p><strong>1.</strong> Create a free Supabase project.</p>
             <p><strong>2.</strong> Run <code>supabase/schema.sql</code> in its SQL Editor.</p>
-            <p><strong>3.</strong> Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> as GitHub Actions repository variables, then redeploy.</p>
+            <p><strong>3.</strong> Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> as GitHub Actions repository variables or in the `github-pages` environment, then redeploy.</p>
           </div>
-          <a className="auth-submit setup-link" href="https://github.com/shalem046-cyber/daily-activity-tracker/blob/main/SUPABASE_SETUP.md" target="_blank" rel="noreferrer">Open setup guide <span aria-hidden="true">↗</span></a>
+          <a className="auth-submit setup-link" href="https://github.com/shalem046-cyber/writeyourdiary/blob/main/SUPABASE_SETUP.md" target="_blank" rel="noreferrer">Open setup guide <span aria-hidden="true">↗</span></a>
           <p className="auth-warning">Never add a Supabase service-role key to this website. Only the public publishable key belongs in the browser; database security depends on the included row-level security policies.</p>
         </section>
       </main>

@@ -60,3 +60,7 @@ Each user's diary is encrypted locally with AES-GCM and a key derived from their
 ## GitHub Pages note
 
 The repository builds a static export. Supabase handles account authentication and shared profile/usage records; there is no private server in this GitHub Pages site. Authorization is enforced by Supabase row-level security, not by hiding the Admin tab alone.
+
+## After adding the GitHub variables
+
+GitHub Actions embeds these public client settings into the static build. Adding or changing a repository variable does not retroactively alter an already-published build. Push a commit or rerun **Deploy Next.js to GitHub Pages** after configuring both variables. If the site still shows the setup screen after deployment, confirm the variable names match exactly and check that the SQL schema above was run successfully.

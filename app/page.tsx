@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type DiaryEntry = {
   id: string;
@@ -16,7 +16,71 @@ type InsightSet = {
   observations: string[];
 };
 
-const STORAGE_KEY = 'vitalflow-diary-entries';
+const STORAGE_KEY = 'vitalflow-encrypted-vault-v1';
+const LEGACY_STORAGE_KEY = 'vitalflow-diary-entries';
+
+type VaultRecord = {
+  version: 1;
+  username: string;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+};
+
+type VaultMeta = { username: string; salt: string };
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, Math.min(start + 0x8000, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(encoded: string) {
+  return Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+}
+
+async function deriveVaultKey(password: string, salt: string) {
+  const material = await window.crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return window.crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: base64ToBytes(salt), iterations: 310000, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptDiary(entries: DiaryEntry[], key: CryptoKey, meta: VaultMeta): Promise<VaultRecord> {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(entries));
+  const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  return {
+    version: 1,
+    username: meta.username,
+    salt: meta.salt,
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(encrypted)),
+  };
+}
+
+async function decryptDiary(record: VaultRecord, key: CryptoKey): Promise<DiaryEntry[]> {
+  const decrypted = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToBytes(record.iv) },
+    key,
+    base64ToBytes(record.ciphertext),
+  );
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(decrypted));
+  if (!Array.isArray(parsed)) throw new Error('Invalid diary data');
+  return parsed as DiaryEntry[];
+}
 
 function getDateKey(date: Date) {
   return date.getFullYear() + '-' +
@@ -134,31 +198,136 @@ export default function Home() {
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState('');
   const [todayKey, setTodayKey] = useState('');
-  const [isReady, setIsReady] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [bootChecked, setBootChecked] = useState(false);
+  const [vaultExists, setVaultExists] = useState(false);
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
+  const vaultKeyRef = useRef<CryptoKey | null>(null);
+  const vaultMetaRef = useRef<VaultMeta | null>(null);
 
   useEffect(() => {
     setTodayKey(getDateKey(new Date()));
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setEntries(parsed);
+        const parsed = JSON.parse(saved) as VaultRecord;
+        if (parsed.version === 1 && parsed.username && parsed.salt && parsed.iv && parsed.ciphertext) {
+          setVaultExists(true);
+          setAuthUsername(parsed.username);
+        }
       }
     } catch {
-      setEntries([]);
+      setAuthError('The saved vault could not be read. Do not clear site data if you need its contents.');
     }
-    setIsReady(true);
+    setBootChecked(true);
   }, []);
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!isUnlocked || !vaultKeyRef.current || !vaultMetaRef.current) return;
+    let cancelled = false;
+    const persistEncrypted = async () => {
+      try {
+        const record = await encryptDiary(entries, vaultKeyRef.current as CryptoKey, vaultMetaRef.current as VaultMeta);
+        if (cancelled) return;
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+        setSaveMessage('Saved and encrypted in this browser.');
+      } catch {
+        if (!cancelled) setSaveMessage('Could not save the encrypted diary. Check browser storage settings.');
+      }
+    };
+    void persistEncrypted();
+    return () => { cancelled = true; };
+  }, [entries, isUnlocked]);
+
+  const handleVaultAccess = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthError('');
+    setAuthBusy(true);
+
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch {
-      setSaveMessage('Your browser could not save the diary. Check its storage settings.');
+      if (!window.crypto?.subtle || !window.isSecureContext) {
+        throw new Error('Secure encryption is unavailable. Open this site over HTTPS in a modern browser.');
+      }
+
+      const username = authUsername.trim().toLowerCase();
+      if (username.length < 3) throw new Error('Choose a username with at least 3 characters.');
+      if (authPassword.length < 8) throw new Error('Use a password with at least 8 characters.');
+
+      if (!vaultExists) {
+        if (authPassword !== authConfirmPassword) throw new Error('The passwords do not match.');
+
+        const salt = bytesToBase64(window.crypto.getRandomValues(new Uint8Array(16)));
+        const meta: VaultMeta = { username, salt };
+        const key = await deriveVaultKey(authPassword, salt);
+
+        // Migrate older unencrypted entries into the encrypted vault, if any exist.
+        let startingEntries: DiaryEntry[] = [];
+        const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacy) {
+          try {
+            const parsed: unknown = JSON.parse(legacy);
+            if (Array.isArray(parsed)) startingEntries = parsed as DiaryEntry[];
+          } catch {
+            startingEntries = [];
+          }
+        }
+
+        const record = await encryptDiary(startingEntries, key, meta);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+        if (legacy !== null) window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+
+        vaultKeyRef.current = key;
+        vaultMetaRef.current = meta;
+        setEntries(startingEntries);
+        setVaultExists(true);
+        setIsUnlocked(true);
+        setSaveMessage('Your private diary is ready. Entries are encrypted on this device.');
+      } else {
+        const saved = window.localStorage.getItem(STORAGE_KEY);
+        if (!saved) throw new Error('This browser has no saved vault. Do not clear site data.');
+        const record = JSON.parse(saved) as VaultRecord;
+        if (record.username !== username) throw new Error('Username or password is incorrect.');
+
+        const key = await deriveVaultKey(authPassword, record.salt);
+        let decryptedEntries: DiaryEntry[];
+        try {
+          decryptedEntries = await decryptDiary(record, key);
+        } catch {
+          throw new Error('Username or password is incorrect.');
+        }
+
+        vaultKeyRef.current = key;
+        vaultMetaRef.current = { username: record.username, salt: record.salt };
+        setEntries(decryptedEntries);
+        setIsUnlocked(true);
+        setSaveMessage('Diary unlocked.');
+      }
+
+      setAuthPassword('');
+      setAuthConfirmPassword('');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to open the private diary.');
+    } finally {
+      setAuthBusy(false);
     }
-  }, [entries, isReady]);
+  };
+
+  const handleLockVault = () => {
+    vaultKeyRef.current = null;
+    vaultMetaRef.current = null;
+    setDraft('');
+    setEntries([]);
+    setIsUnlocked(false);
+    setAuthPassword('');
+    setAuthConfirmPassword('');
+    setSaveMessage('');
+    setAuthError('');
+  };
 
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
@@ -237,6 +406,101 @@ export default function Home() {
     setSaveMessage('');
   };
 
+  if (!bootChecked) {
+    return (
+      <main className="auth-shell">
+        <div className="auth-orb auth-orb-one" aria-hidden="true" />
+        <div className="auth-orb auth-orb-two" aria-hidden="true" />
+        <section className="auth-card auth-card-loading">
+          <div className="auth-logo">V</div>
+          <p className="auth-kicker">VITALFLOW · PRIVATE JOURNAL</p>
+          <h1>Preparing your diary.</h1>
+          <p className="auth-description">Checking this browser for your encrypted vault…</p>
+          <div className="loading-line" />
+        </section>
+      </main>
+    );
+  }
+
+  if (!isUnlocked) {
+    return (
+      <main className="auth-shell">
+        <div className="auth-orb auth-orb-one" aria-hidden="true" />
+        <div className="auth-orb auth-orb-two" aria-hidden="true" />
+        <div className="auth-orb auth-orb-three" aria-hidden="true" />
+        <section className="auth-card">
+          <div className="auth-logo">V</div>
+          <p className="auth-kicker">VITALFLOW · PRIVATE JOURNAL</p>
+          <h1>{vaultExists ? 'Welcome back.' : 'A quiet place, just for you.'}</h1>
+          <p className="auth-description">
+            {vaultExists
+              ? 'Unlock your diary to revisit your days, thoughts, routines, and progress.'
+              : 'Create your private diary. Your entries will be encrypted before they are saved in this browser.'}
+          </p>
+
+          <form className="auth-form" onSubmit={handleVaultAccess}>
+            <label className="auth-label">
+              Username
+              <input
+                className="auth-input"
+                value={authUsername}
+                onChange={(event) => { setAuthUsername(event.target.value); setAuthError(''); }}
+                autoComplete="username"
+                minLength={3}
+                maxLength={40}
+                required
+                placeholder="Choose a username"
+              />
+            </label>
+            <label className="auth-label">
+              Password
+              <input
+                className="auth-input"
+                type="password"
+                value={authPassword}
+                onChange={(event) => { setAuthPassword(event.target.value); setAuthError(''); }}
+                autoComplete={vaultExists ? 'current-password' : 'new-password'}
+                minLength={8}
+                required
+                placeholder="At least 8 characters"
+              />
+            </label>
+            {!vaultExists ? (
+              <label className="auth-label">
+                Confirm password
+                <input
+                  className="auth-input"
+                  type="password"
+                  value={authConfirmPassword}
+                  onChange={(event) => { setAuthConfirmPassword(event.target.value); setAuthError(''); }}
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  placeholder="Type the password again"
+                />
+              </label>
+            ) : null}
+            <button className="auth-submit" type="submit" disabled={authBusy}>
+              {authBusy ? 'Securing your diary…' : vaultExists ? 'Unlock private diary' : 'Create private diary'}
+              <span aria-hidden="true">↗</span>
+            </button>
+          </form>
+
+          {authError ? <p className="auth-error" role="alert">{authError}</p> : null}
+
+          <div className="auth-assurance">
+            <span className="assurance-icon" aria-hidden="true">✦</span>
+            <p><strong>Encrypted on your device</strong><br />Your diary text is encrypted with AES-GCM. Your password is not stored.</p>
+          </div>
+          <p className="auth-warning">
+            This vault is specific to this browser. There is no password reset: forgetting your password or clearing this site’s storage can permanently lock you out.
+          </p>
+        </section>
+        <p className="auth-footer">PERSONAL BY DESIGN <span>·</span> PRIVATE BY DEFAULT</p>
+      </main>
+    );
+  }
+
   return (
     <main className="page-shell">
       <div className="container">
@@ -248,9 +512,14 @@ export default function Home() {
               <p className="brand-name">Daily Diary</p>
             </div>
           </div>
-          <div className="header-date">
-            <span className="date-dot" aria-hidden="true" />
-            <span>{formatLongDate(todayKey)}</span>
+          <div className="header-actions">
+            <div className="header-date">
+              <span className="date-dot" aria-hidden="true" />
+              <span>{formatLongDate(todayKey)}</span>
+            </div>
+            <button className="lock-button" type="button" onClick={handleLockVault}>
+              <span aria-hidden="true">⌑</span> Lock diary
+            </button>
           </div>
         </header>
 

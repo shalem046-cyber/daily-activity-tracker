@@ -24,14 +24,14 @@ Add that same address to the allowed redirect URLs. Keep email confirmation enab
 
 ## 4. Add public client configuration to GitHub Actions
 
-In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables**, and create these repository variables:
+In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables**, and create these repository variables. The workflow also supports settings stored under **Settings → Environments → github-pages**:
 
 - \`NEXT_PUBLIC_SUPABASE_URL\`: your Supabase Project URL
 - \`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY\`: your Supabase publishable key
 
 These two values are meant for the browser. **Never use or add a \`service_role\` secret/key to this frontend or to these variables.** The website has only the public publishable key; table access is limited by the SQL row-level security policies.
 
-After adding them, open **Actions**, select **Deploy Next.js to GitHub Pages**, and run the workflow manually (or push a commit). The published site shows a setup notice until these variables have been included in a new build.
+The build job explicitly uses the `github-pages` environment, so variables and secrets stored there are available during the build. After adding them, open **Actions**, select **Deploy Next.js to GitHub Pages**, and run the workflow manually (or push a commit). The build now stops with a clear error if either value is missing rather than publishing the setup screen again. The published site shows a setup notice until these variables have been included in a new build.
 
 ## 5. Create your account and make it the admin
 
